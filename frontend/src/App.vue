@@ -54,6 +54,13 @@
 
     <!-- Calling (outgoing, waiting) -->
     <div v-if="callState === 'calling'" class="calling-screen">
+      <video
+        ref="callingLocalVideo"
+        class="calling-local-video"
+        autoplay
+        playsinline
+        muted
+      ></video>
       <div class="calling-info">
         <div class="pulse-ring"></div>
         <p>Вызываем...</p>
@@ -83,6 +90,9 @@
       <div class="call-controls">
         <button class="ctrl-btn" :class="{ active: isMuted }" @click="toggleMute">
           {{ isMuted ? '🔇' : '🎤' }}
+        </button>
+        <button class="ctrl-btn" :class="{ active: isSpeaker }" @click="toggleSpeaker">
+          {{ isSpeaker ? '🔊' : '🔈' }}
         </button>
         <button class="ctrl-btn btn-hangup-round" @click="hangup">
           📵
@@ -124,10 +134,13 @@ const wsConnected = ref(false)
 const errorMsg = ref('')
 const isMuted = ref(false)
 const isCamOff = ref(false)
+const isSpeaker = ref(true)
 const audioOnly = ref(false)
 
 const localVideo = ref(null)
 const remoteVideo = ref(null)
+const callingLocalVideo = ref(null)
+let remoteAudioEl = null
 
 let ws = null
 let peer = null
@@ -288,8 +301,8 @@ async function startCall(isAudioOnly) {
   remoteUserId.value = targetUserId.value
 
   await nextTick()
-  if (localVideo.value) {
-    localVideo.value.srcObject = stream
+  if (callingLocalVideo.value && !isAudioOnly) {
+    callingLocalVideo.value.srcObject = stream
   }
 
   // Send call request
@@ -368,6 +381,11 @@ function createPeer(initiator, stream) {
       if (remoteVideo.value) {
         remoteVideo.value.srcObject = remoteStream
       }
+      if (localVideo.value && localStream) {
+        localVideo.value.srcObject = localStream
+      }
+      // Create hidden audio element for speaker control
+      setupRemoteAudio(remoteStream)
     })
   })
 
@@ -395,11 +413,63 @@ function toggleMute() {
   isMuted.value = !isMuted.value
 }
 
-function toggleCamera() {
-  if (!localStream) return
+async function toggleCamera() {
+  if (!peer || !localStream) return
+
   const videoTracks = localStream.getVideoTracks()
-  videoTracks.forEach((t) => { t.enabled = !t.enabled })
-  isCamOff.value = !isCamOff.value
+
+  if (videoTracks.length > 0) {
+    // Has video tracks — toggle them
+    const newState = !videoTracks[0].enabled
+    videoTracks.forEach((t) => { t.enabled = newState })
+    isCamOff.value = !newState
+  } else {
+    // Audio-only call — add video track
+    try {
+      const videoStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      })
+      const videoTrack = videoStream.getVideoTracks()[0]
+      localStream.addTrack(videoTrack)
+      peer.addTrack(videoTrack, localStream)
+      isCamOff.value = false
+      audioOnly.value = false
+      await nextTick()
+      if (localVideo.value) {
+        localVideo.value.srcObject = localStream
+      }
+    } catch (err) {
+      showError('Не удалось включить камеру')
+      console.error('[Camera]', err)
+    }
+  }
+}
+
+function setupRemoteAudio(remoteStream) {
+  if (remoteAudioEl) {
+    remoteAudioEl.srcObject = null
+    remoteAudioEl.remove()
+  }
+  remoteAudioEl = document.createElement('audio')
+  remoteAudioEl.srcObject = remoteStream
+  remoteAudioEl.autoplay = true
+  remoteAudioEl.style.display = 'none'
+  document.body.appendChild(remoteAudioEl)
+}
+
+function toggleSpeaker() {
+  isSpeaker.value = !isSpeaker.value
+  // Use setSinkId if available (Chrome, Edge)
+  const el = remoteAudioEl || remoteVideo.value
+  if (el && typeof el.setSinkId === 'function') {
+    // 'default' = speaker, 'communications' = earpiece on some devices
+    el.setSinkId(isSpeaker.value ? 'default' : 'communications')
+      .catch((err) => console.warn('[Speaker] setSinkId not supported:', err))
+  }
+  // Fallback: adjust volume as visual hint (actual routing is OS-dependent on mobile)
+  if (el) {
+    el.volume = isSpeaker.value ? 1.0 : 0.6
+  }
 }
 
 // ─── Timer ───
@@ -425,9 +495,15 @@ function cleanup() {
     clearInterval(durationTimer)
     durationTimer = null
   }
+  if (remoteAudioEl) {
+    remoteAudioEl.srcObject = null
+    remoteAudioEl.remove()
+    remoteAudioEl = null
+  }
   callState.value = 'idle'
   isMuted.value = false
   isCamOff.value = false
+  isSpeaker.value = true
   callDurationSec.value = 0
   pendingSignalData = null
   pendingSignals = []
@@ -637,6 +713,20 @@ body {
   justify-content: center;
   align-items: center;
   gap: 40px;
+  position: relative;
+}
+
+.calling-local-video {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 120px;
+  height: 160px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 2px solid rgba(255,255,255,0.3);
+  z-index: 10;
+  background: #222;
 }
 
 .calling-info {
@@ -715,8 +805,8 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 24px;
-  padding: 20px;
+  gap: 16px;
+  padding: 16px;
   background: rgba(0,0,0,0.8);
 }
 
