@@ -1,10 +1,13 @@
 require('dotenv').config();
 const https = require('https');
+const http = require('http');
 const TelegramBot = require('node-telegram-bot-api');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const WEB_APP_URL = process.env.WEB_APP_URL || 'https://your-frontend.onrender.com';
 const BACKEND_URL = process.env.BACKEND_URL || 'https://tg-webrtcbackend.onrender.com';
+const PORT = process.env.PORT || 3001;
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL || '';
 
 if (!BOT_TOKEN) {
   console.error('BOT_TOKEN is required!');
@@ -20,7 +23,6 @@ function postBackend(path, data) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(data);
     const url = new URL(path, BACKEND_URL);
-    console.log(`[Bot] POST ${url.href}`);
     const req = https.request({
       hostname: url.hostname,
       port: url.port || 443,
@@ -34,7 +36,7 @@ function postBackend(path, data) {
       let body = '';
       res.on('data', (d) => { body += d; });
       res.on('end', () => {
-        console.log(`[Bot] Response ${res.statusCode}: ${body}`);
+        console.log(`[Bot] POST ${path} -> ${res.statusCode}`);
         resolve(body);
       });
     });
@@ -47,120 +49,174 @@ function postBackend(path, data) {
   });
 }
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+// ─── Bot with auto-restart polling ───
+let bot = null;
+let lastActivity = Date.now();
+let pollingErrors = 0;
 
-// ─── Handle ALL messages (no regex issues) ───
-bot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  const userId = String(msg.from.id);
-  const text = (msg.text || '').trim();
+function createBot() {
+  if (bot) {
+    try { bot.stopPolling(); } catch {}
+  }
 
-  console.log(`[Bot] Message from ${userId}: "${text}"`);
+  bot = new TelegramBot(BOT_TOKEN, {
+    polling: {
+      autoStart: true,
+      params: { timeout: 30 },
+    },
+  });
 
-  // ─── /start with optional deep link param ───
-  if (text.startsWith('/start')) {
-    const parts = text.split(/\s+/);
-    const param = parts[1] || '';
+  lastActivity = Date.now();
+  pollingErrors = 0;
+  console.log('[Bot] Polling started at', new Date().toISOString());
 
-    console.log(`[Bot] /start param="${param}"`);
+  // ─── Handle ALL messages ───
+  bot.on('message', async (msg) => {
+    lastActivity = Date.now();
+    const chatId = msg.chat.id;
+    const userId = String(msg.from.id);
+    const text = (msg.text || '').trim();
 
-    // Register user
-    try {
-      await postBackend('/api/register', {
-        id: userId,
-        firstName: msg.from.first_name || '',
-        lastName: msg.from.last_name || '',
-        username: msg.from.username || '',
-      });
-    } catch (e) {
-      console.error('[Bot] Register failed:', e.message);
-    }
+    console.log(`[Bot] Message from ${userId}: "${text}"`);
 
-    // Referral: /start add_USERID
-    if (param.startsWith('add_')) {
-      const friendId = param.slice(4);
-      console.log(`[Bot] Adding friend: ${userId} <-> ${friendId}`);
-      if (friendId && friendId !== userId) {
-        try {
-          await postBackend('/api/add-friend', {
-            userId,
-            friendId,
-            userProfile: {
-              firstName: msg.from.first_name || '',
-              lastName: msg.from.last_name || '',
-              username: msg.from.username || '',
-            },
-          });
-          return bot.sendMessage(chatId,
-            `✅ Контакт добавлен!\n\nТеперь вы можете звонить друг другу.`,
-            {
-              parse_mode: 'HTML',
-              reply_markup: {
-                inline_keyboard: [[{
-                  text: '📞 Открыть Звонки',
-                  web_app: { url: WEB_APP_URL },
-                }]],
+    // ─── /start with optional deep link param ───
+    if (text.startsWith('/start')) {
+      const parts = text.split(/\s+/);
+      const param = parts[1] || '';
+
+      console.log(`[Bot] /start param="${param}"`);
+
+      // Register user
+      try {
+        await postBackend('/api/register', {
+          id: userId,
+          firstName: msg.from.first_name || '',
+          lastName: msg.from.last_name || '',
+          username: msg.from.username || '',
+        });
+      } catch (e) {
+        console.error('[Bot] Register failed:', e.message);
+      }
+
+      // Referral: /start add_USERID
+      if (param.startsWith('add_')) {
+        const friendId = param.slice(4);
+        console.log(`[Bot] Adding friend: ${userId} <-> ${friendId}`);
+        if (friendId && friendId !== userId) {
+          try {
+            await postBackend('/api/add-friend', {
+              userId,
+              friendId,
+              userProfile: {
+                firstName: msg.from.first_name || '',
+                lastName: msg.from.last_name || '',
+                username: msg.from.username || '',
               },
-            }
-          );
-        } catch (e) {
-          console.error('[Bot] Add friend failed:', e.message);
+            });
+            return bot.sendMessage(chatId,
+              `✅ Контакт добавлен!\n\nТеперь вы можете звонить друг другу.`,
+              {
+                parse_mode: 'HTML',
+                reply_markup: {
+                  inline_keyboard: [[{
+                    text: '📞 Открыть Звонки',
+                    web_app: { url: WEB_APP_URL },
+                  }]],
+                },
+              }
+            );
+          } catch (e) {
+            console.error('[Bot] Add friend failed:', e.message);
+          }
         }
       }
+
+      // Normal /start
+      const userName = msg.from.first_name || 'пользователь';
+      return bot.sendMessage(chatId,
+        `Привет, ${userName}! 👋\n\n` +
+        `Нажми кнопку ниже, чтобы открыть приложение для звонков.\n\n` +
+        `Твой Telegram ID: <code>${msg.from.id}</code>`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[{
+              text: '📞 Открыть Звонки',
+              web_app: { url: WEB_APP_URL },
+            }]],
+          },
+        }
+      );
     }
 
-    // Normal /start
-    const userName = msg.from.first_name || 'пользователь';
-    return bot.sendMessage(chatId,
-      `Привет, ${userName}! 👋\n\n` +
-      `Нажми кнопку ниже, чтобы открыть приложение для звонков.\n\n` +
-      `Твой Telegram ID: <code>${msg.from.id}</code>`,
-      {
+    // ─── /help ───
+    if (text.startsWith('/help')) {
+      return bot.sendMessage(chatId,
+        '📞 <b>Как пользоваться:</b>\n\n' +
+        '1. Нажми /start и открой приложение\n' +
+        '2. Во вкладке «Контакты» увидишь друзей\n' +
+        '3. Нажми кнопку «Пригласить» чтобы добавить контакт\n' +
+        '4. Или введи Telegram ID во вкладке «Набрать»\n' +
+        '5. Нажми аудио или видео для звонка\n\n' +
+        '🔗 Поделись ссылкой-приглашением из приложения!',
+        { parse_mode: 'HTML' }
+      );
+    }
+
+    // ─── /myid ───
+    if (text.startsWith('/myid')) {
+      return bot.sendMessage(chatId, `Твой Telegram ID: <code>${msg.from.id}</code>`, {
         parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: [[{
-            text: '📞 Открыть Звонки',
-            web_app: { url: WEB_APP_URL },
-          }]],
-        },
-      }
-    );
+      });
+    }
+  });
+
+  bot.on('polling_error', (err) => {
+    pollingErrors++;
+    console.error(`[Bot] Polling error #${pollingErrors}:`, err.code, err.message);
+    // After 5 consecutive errors, force restart
+    if (pollingErrors >= 5) {
+      console.log('[Bot] Too many polling errors, restarting...');
+      setTimeout(createBot, 3000);
+    }
+  });
+}
+
+// Start bot
+createBot();
+
+// ─── Watchdog: restart polling if silent for 5 min ───
+setInterval(() => {
+  const silentMin = Math.round((Date.now() - lastActivity) / 60000);
+  console.log(`[Bot] Watchdog: ${silentMin}m since last activity, errors: ${pollingErrors}`);
+
+  // Restart if silent for 5+ minutes (polling likely dead)
+  if (silentMin >= 5) {
+    console.log('[Bot] Watchdog: polling seems dead, restarting...');
+    createBot();
   }
+}, 2 * 60 * 1000); // Check every 2 minutes
 
-  // ─── /help ───
-  if (text.startsWith('/help')) {
-    return bot.sendMessage(chatId,
-      '📞 <b>Как пользоваться:</b>\n\n' +
-      '1. Нажми /start и открой приложение\n' +
-      '2. Во вкладке «Контакты» увидишь друзей\n' +
-      '3. Нажми кнопку «Пригласить» чтобы добавить контакт\n' +
-      '4. Или введи Telegram ID во вкладке «Набрать»\n' +
-      '5. Нажми аудио или видео для звонка\n\n' +
-      '🔗 Поделись ссылкой-приглашением из приложения!',
-      { parse_mode: 'HTML' }
-    );
-  }
+// ─── Self-ping to prevent Render free tier sleep ───
+if (RENDER_URL) {
+  setInterval(() => {
+    http.get(`${RENDER_URL}/health`, () => {}).on('error', () => {});
+  }, 10 * 60 * 1000); // Every 10 min
+}
 
-  // ─── /myid ───
-  if (text.startsWith('/myid')) {
-    return bot.sendMessage(chatId, `Твой Telegram ID: <code>${msg.from.id}</code>`, {
-      parse_mode: 'HTML',
-    });
-  }
-});
-
-bot.on('polling_error', (err) => {
-  console.error('[Bot] Polling error:', err.code, err.message);
-});
-
-// Minimal HTTP server so Render Web Service doesn't time out
-const http = require('http');
-const PORT = process.env.PORT || 3001;
+// ─── Health HTTP server ───
 http.createServer((req, res) => {
+  lastActivity = Date.now(); // Health check counts as activity
+  const uptime = Math.round(process.uptime());
   res.writeHead(200, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ status: 'bot running' }));
+  res.end(JSON.stringify({
+    status: 'ok',
+    uptime: `${Math.floor(uptime/60)}m ${uptime%60}s`,
+    pollingErrors,
+    lastActivity: new Date(lastActivity).toISOString(),
+  }));
 }).listen(PORT, () => {
   console.log(`[Bot] Health server on port ${PORT}`);
 });
 
-console.log('[Bot] Ready, listening for messages...');
+console.log('[Bot] Ready.');
