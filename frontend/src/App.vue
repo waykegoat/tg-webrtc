@@ -6,7 +6,7 @@
       <header class="hdr">
         <div class="hdr-left">
           <span class="hdr-dot" :class="wsConnected ? 'on' : 'off'"></span>
-          <span class="hdr-title">Звонки</span>
+          <span class="hdr-title">Звонки Beta</span>
         </div>
         <button class="hdr-share" @click="shareInvite">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
@@ -229,7 +229,7 @@ const isCamOff = ref(false)
 const isSpeaker = ref(false)
 const audioOnly = ref(false)
 const isSwapped = ref(false)
-const remoteCamOff = ref(false)
+const remoteHasVideo = ref(false)
 const facingFront = ref(true)
 const refreshingContacts = ref(false)
 const refreshingHistory = ref(false)
@@ -303,10 +303,10 @@ const peerName = computed(() => {
 
 const showMainAvatar = computed(() => {
   if (isSwapped.value) return isCamOff.value || audioOnly.value
-  return remoteCamOff.value || audioOnly.value
+  return !remoteHasVideo.value
 })
 const showPipAvatar = computed(() => {
-  if (isSwapped.value) return remoteCamOff.value || audioOnly.value
+  if (isSwapped.value) return !remoteHasVideo.value
   return isCamOff.value || audioOnly.value
 })
 const mainAvatarLetter = computed(() => isSwapped.value ? myInitial.value : peerInitial.value)
@@ -553,7 +553,7 @@ function handleSignal(msg) {
       break
 
     case 'camera-state':
-      remoteCamOff.value = msg.payload?.camOff || false
+      remoteHasVideo.value = !(msg.payload?.camOff)
       break
 
     case 'hangup':
@@ -668,6 +668,20 @@ function createPeer(initiator, stream) {
     stopRingSound()
     callState.value = 'active'
     startDurationTimer()
+
+    // Detect remote video track state
+    function updateRemoteVideo() {
+      const vt = rs.getVideoTracks()
+      remoteHasVideo.value = vt.length > 0 && vt.some(t => t.enabled && !t.muted)
+    }
+    updateRemoteVideo()
+    rs.onaddtrack = updateRemoteVideo
+    rs.onremovetrack = updateRemoteVideo
+    rs.getVideoTracks().forEach(t => {
+      t.onmute = () => { remoteHasVideo.value = false }
+      t.onunmute = () => { updateRemoteVideo() }
+    })
+
     nextTick(() => {
       assignVideos()
       setupRemoteAudio(rs)
@@ -957,7 +971,7 @@ function cleanup(status) {
   isCamOff.value = false
   isSpeaker.value = false
   isSwapped.value = false
-  remoteCamOff.value = false
+  remoteHasVideo.value = false
   facingFront.value = true
   callDurationSec.value = 0
   pendingSignals = []
