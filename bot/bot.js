@@ -7,15 +7,20 @@ const WEB_APP_URL = process.env.WEB_APP_URL || 'https://your-frontend.onrender.c
 const BACKEND_URL = process.env.BACKEND_URL || 'https://tg-webrtcbackend.onrender.com';
 
 if (!BOT_TOKEN) {
-  console.error('BOT_TOKEN is required! Set it in .env file.');
+  console.error('BOT_TOKEN is required!');
   process.exit(1);
 }
 
-// Helper: POST JSON to backend (uses built-in https, no fetch needed)
+console.log('[Bot] Starting...');
+console.log('[Bot] BACKEND_URL:', BACKEND_URL);
+console.log('[Bot] WEB_APP_URL:', WEB_APP_URL);
+
+// ─── Helper: POST to backend ───
 function postBackend(path, data) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(data);
     const url = new URL(path, BACKEND_URL);
+    console.log(`[Bot] POST ${url.href}`);
     const req = https.request({
       hostname: url.hostname,
       port: url.port || 443,
@@ -29,12 +34,12 @@ function postBackend(path, data) {
       let body = '';
       res.on('data', (d) => { body += d; });
       res.on('end', () => {
-        console.log(`[Bot] POST ${path} -> ${res.statusCode}: ${body}`);
+        console.log(`[Bot] Response ${res.statusCode}: ${body}`);
         resolve(body);
       });
     });
     req.on('error', (e) => {
-      console.error(`[Bot] POST ${path} error:`, e.message);
+      console.error(`[Bot] Request error:`, e.message);
       reject(e);
     });
     req.write(payload);
@@ -44,102 +49,108 @@ function postBackend(path, data) {
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-console.log('[Bot] Started polling...');
-console.log('[Bot] BACKEND_URL:', BACKEND_URL);
-
-// /start command — handles both normal start and referral links
-bot.onText(/\/start(.*)/, async (msg, match) => {
+// ─── Handle ALL messages (no regex issues) ───
+bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const userId = String(msg.from.id);
-  const userName = msg.from.first_name || 'пользователь';
-  const param = (match[1] || '').trim();
+  const text = (msg.text || '').trim();
 
-  console.log(`[Bot] /start from ${userId}, param="${param}"`);
+  console.log(`[Bot] Message from ${userId}: "${text}"`);
 
-  // Register this user on the backend
-  try {
-    await postBackend('/api/register', {
-      id: userId,
-      firstName: msg.from.first_name || '',
-      lastName: msg.from.last_name || '',
-      username: msg.from.username || '',
-    });
-  } catch (e) {
-    console.error('[Bot] Register error:', e.message);
-  }
+  // ─── /start with optional deep link param ───
+  if (text.startsWith('/start')) {
+    const parts = text.split(/\s+/);
+    const param = parts[1] || '';
 
-  // Handle referral: /start add_123456
-  if (param.startsWith('add_')) {
-    const friendId = param.slice(4);
-    console.log(`[Bot] Referral: userId=${userId}, friendId=${friendId}`);
-    if (friendId && friendId !== userId) {
-      try {
-        await postBackend('/api/add-friend', {
-          userId,
-          friendId,
-          userProfile: {
-            firstName: msg.from.first_name || '',
-            lastName: msg.from.last_name || '',
-            username: msg.from.username || '',
-          },
-        });
-        bot.sendMessage(chatId,
-          `✅ Контакт добавлен!\n\nТеперь вы можете звонить друг другу.`,
-          {
-            parse_mode: 'HTML',
-            reply_markup: {
-              inline_keyboard: [[{
-                text: '📞 Открыть Звонки',
-                web_app: { url: WEB_APP_URL },
-              }]],
+    console.log(`[Bot] /start param="${param}"`);
+
+    // Register user
+    try {
+      await postBackend('/api/register', {
+        id: userId,
+        firstName: msg.from.first_name || '',
+        lastName: msg.from.last_name || '',
+        username: msg.from.username || '',
+      });
+    } catch (e) {
+      console.error('[Bot] Register failed:', e.message);
+    }
+
+    // Referral: /start add_USERID
+    if (param.startsWith('add_')) {
+      const friendId = param.slice(4);
+      console.log(`[Bot] Adding friend: ${userId} <-> ${friendId}`);
+      if (friendId && friendId !== userId) {
+        try {
+          await postBackend('/api/add-friend', {
+            userId,
+            friendId,
+            userProfile: {
+              firstName: msg.from.first_name || '',
+              lastName: msg.from.last_name || '',
+              username: msg.from.username || '',
             },
-          }
-        );
-        return;
-      } catch (e) {
-        console.error('[Bot] Add friend error:', e.message);
+          });
+          return bot.sendMessage(chatId,
+            `✅ Контакт добавлен!\n\nТеперь вы можете звонить друг другу.`,
+            {
+              parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: [[{
+                  text: '📞 Открыть Звонки',
+                  web_app: { url: WEB_APP_URL },
+                }]],
+              },
+            }
+          );
+        } catch (e) {
+          console.error('[Bot] Add friend failed:', e.message);
+        }
       }
     }
+
+    // Normal /start
+    const userName = msg.from.first_name || 'пользователь';
+    return bot.sendMessage(chatId,
+      `Привет, ${userName}! 👋\n\n` +
+      `Нажми кнопку ниже, чтобы открыть приложение для звонков.\n\n` +
+      `Твой Telegram ID: <code>${msg.from.id}</code>`,
+      {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [[{
+            text: '📞 Открыть Звонки',
+            web_app: { url: WEB_APP_URL },
+          }]],
+        },
+      }
+    );
   }
 
-  // Normal /start
-  bot.sendMessage(chatId,
-    `Привет, ${userName}! 👋\n\n` +
-    `Нажми кнопку ниже, чтобы открыть приложение для звонков.\n\n` +
-    `Твой Telegram ID: <code>${msg.from.id}</code>`,
-    {
+  // ─── /help ───
+  if (text.startsWith('/help')) {
+    return bot.sendMessage(chatId,
+      '📞 <b>Как пользоваться:</b>\n\n' +
+      '1. Нажми /start и открой приложение\n' +
+      '2. Во вкладке «Контакты» увидишь друзей\n' +
+      '3. Нажми кнопку «Пригласить» чтобы добавить контакт\n' +
+      '4. Или введи Telegram ID во вкладке «Набрать»\n' +
+      '5. Нажми аудио или видео для звонка\n\n' +
+      '🔗 Поделись ссылкой-приглашением из приложения!',
+      { parse_mode: 'HTML' }
+    );
+  }
+
+  // ─── /myid ───
+  if (text.startsWith('/myid')) {
+    return bot.sendMessage(chatId, `Твой Telegram ID: <code>${msg.from.id}</code>`, {
       parse_mode: 'HTML',
-      reply_markup: {
-        inline_keyboard: [[{
-          text: '📞 Открыть Звонки',
-          web_app: { url: WEB_APP_URL },
-        }]],
-      },
-    }
-  );
-});
-
-// /help command
-bot.onText(/\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id,
-    '📞 <b>Как пользоваться:</b>\n\n' +
-    '1. Нажми /start и открой приложение\n' +
-    '2. Во вкладке «Контакты» увидишь друзей\n' +
-    '3. Нажми кнопку «Пригласить» чтобы добавить контакт\n' +
-    '4. Или введи Telegram ID во вкладке «Набрать»\n' +
-    '5. Нажми аудио или видео для звонка\n\n' +
-    '🔗 Ты также можешь поделиться ссылкой-приглашением из приложения!',
-    { parse_mode: 'HTML' }
-  );
-});
-
-// /myid command
-bot.onText(/\/myid/, (msg) => {
-  bot.sendMessage(msg.chat.id, `Твой Telegram ID: <code>${msg.from.id}</code>`, {
-    parse_mode: 'HTML',
-  });
+    });
+  }
 });
 
 bot.on('polling_error', (err) => {
   console.error('[Bot] Polling error:', err.code, err.message);
 });
+
+console.log('[Bot] Ready, listening for messages...');

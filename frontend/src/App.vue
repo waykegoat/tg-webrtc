@@ -283,6 +283,14 @@ function initTelegram() {
         username: user.username || '',
       }
     }
+    // Handle deep link referral: start_param = "add_USERID"
+    const startParam = tg.initDataUnsafe?.start_param || ''
+    if (startParam.startsWith('add_') && myUserId.value) {
+      const friendId = startParam.slice(4)
+      if (friendId && friendId !== myUserId.value) {
+        addFriendViaApi(friendId)
+      }
+    }
   }
   if (!myUserId.value) {
     const saved = localStorage.getItem('zvonki_user_id')
@@ -295,6 +303,24 @@ function initTelegram() {
         localStorage.setItem('zvonki_user_id', myUserId.value)
       }
     }
+  }
+}
+
+async function addFriendViaApi(friendId) {
+  try {
+    await fetch(`${API_URL}/api/add-friend`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: myUserId.value,
+        friendId,
+        userProfile: myProfile.value,
+      }),
+    })
+    showToast('Контакт добавлен!', 'info')
+    fetchContacts()
+  } catch (e) {
+    console.warn('[API] add-friend failed:', e)
   }
 }
 
