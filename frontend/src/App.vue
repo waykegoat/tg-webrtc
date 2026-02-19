@@ -54,7 +54,10 @@
             </div>
           </div>
         </div>
-        <button class="refresh-btn" @click="fetchContacts">Обновить</button>
+        <button class="refresh-btn" :class="{ loading: refreshingContacts }" @click="doRefreshContacts" :disabled="refreshingContacts">
+          <svg class="refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Обновить
+        </button>
       </div>
 
       <!-- History tab -->
@@ -78,7 +81,10 @@
             <div class="hist-time">{{ formatTime(h.startTime) }}</div>
           </div>
         </div>
-        <button class="refresh-btn" @click="fetchHistory">Обновить</button>
+        <button class="refresh-btn" :class="{ loading: refreshingHistory }" @click="doRefreshHistory" :disabled="refreshingHistory">
+          <svg class="refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Обновить
+        </button>
       </div>
 
       <!-- Dial pad -->
@@ -136,7 +142,18 @@
     <div v-if="callState === 'active'" class="scene active-scene">
       <div class="vid-wrap">
         <video ref="mainVideo" class="main-video" autoplay playsinline :muted="isSwapped"></video>
+        <transition name="fade">
+          <div v-if="showMainAvatar" class="vid-avatar-overlay">
+            <div class="vid-avatar">{{ mainAvatarLetter }}</div>
+            <span class="vid-avatar-name">{{ mainAvatarName }}</span>
+          </div>
+        </transition>
         <video ref="pipVideoEl" class="pip-video pip-active" autoplay playsinline :muted="!isSwapped" @click="swapVideos"></video>
+        <transition name="fade">
+          <div v-if="showPipAvatar" class="pip-avatar-overlay" @click="swapVideos">
+            <div class="vid-avatar sm">{{ pipAvatarLetter }}</div>
+          </div>
+        </transition>
         <div class="timer-badge">{{ callDuration }}</div>
       </div>
       <div class="ctrls">
@@ -154,6 +171,9 @@
         <button class="ctrl" :class="{ on: isCamOff }" @click="toggleCamera">
           <svg v-if="!isCamOff" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
           <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 16v1a2 2 0 01-2 2H3a2 2 0 01-2-2V7a2 2 0 012-2h2m5.66 0H14a2 2 0 012 2v3.34l1 1L23 7v10"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+        </button>
+        <button class="ctrl" @click="flipCamera" :disabled="isCamOff || audioOnly">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
         </button>
       </div>
     </div>
@@ -201,6 +221,9 @@ const isCamOff = ref(false)
 const isSpeaker = ref(false)
 const audioOnly = ref(false)
 const isSwapped = ref(false)
+const facingFront = ref(true)
+const refreshingContacts = ref(false)
+const refreshingHistory = ref(false)
 
 const callingLocalVideo = ref(null)
 const mainVideo = ref(null)
@@ -229,6 +252,29 @@ const callerDisplayName = computed(() => {
   if (c) return contactDisplayName(c)
   return remoteUserId.value
 })
+
+const myInitial = computed(() => {
+  if (myProfile.value?.firstName) return myProfile.value.firstName.charAt(0).toUpperCase()
+  return 'Я'
+})
+
+const peerInitial = computed(() => {
+  const c = contacts.value.find((x) => x.id === remoteUserId.value)
+  if (c) return contactInitials(c)
+  return '#'
+})
+
+const peerName = computed(() => {
+  const c = contacts.value.find((x) => x.id === remoteUserId.value)
+  if (c) return contactDisplayName(c)
+  return remoteUserId.value
+})
+
+const showMainAvatar = computed(() => isSwapped.value ? isCamOff.value : audioOnly.value)
+const showPipAvatar = computed(() => isSwapped.value ? audioOnly.value : isCamOff.value)
+const mainAvatarLetter = computed(() => isSwapped.value ? myInitial.value : peerInitial.value)
+const mainAvatarName = computed(() => isSwapped.value ? 'Вы' : peerName.value)
+const pipAvatarLetter = computed(() => isSwapped.value ? peerInitial.value : myInitial.value)
 
 // ─── Helpers ───
 function contactDisplayName(c) {
@@ -367,6 +413,12 @@ async function fetchContacts() {
   }
 }
 
+async function doRefreshContacts() {
+  refreshingContacts.value = true
+  await fetchContacts()
+  setTimeout(() => { refreshingContacts.value = false }, 600)
+}
+
 async function fetchHistory() {
   try {
     const res = await fetch(`${API_URL}/api/history?userId=${myUserId.value}`)
@@ -374,6 +426,12 @@ async function fetchHistory() {
   } catch (e) {
     console.warn('[API] history failed:', e)
   }
+}
+
+async function doRefreshHistory() {
+  refreshingHistory.value = true
+  await fetchHistory()
+  setTimeout(() => { refreshingHistory.value = false }, 600)
 }
 
 async function saveCallLog(status) {
@@ -624,6 +682,27 @@ async function toggleCamera() {
   }
 }
 
+async function flipCamera() {
+  if (!peer || !localStream || isCamOff.value || audioOnly.value) return
+  const oldTrack = localStream.getVideoTracks()[0]
+  if (!oldTrack) return
+  oldTrack.stop()
+  localStream.removeTrack(oldTrack)
+  facingFront.value = !facingFront.value
+  try {
+    const newStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: facingFront.value ? 'user' : 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+    })
+    const newTrack = newStream.getVideoTracks()[0]
+    localStream.addTrack(newTrack)
+    peer.replaceTrack(oldTrack, newTrack, localStream)
+    await nextTick()
+    assignVideos()
+  } catch (e) {
+    showToast('Не удалось переключить камеру', 'err')
+  }
+}
+
 // ─── Speaker / earpiece toggle ───
 // Mobile trick: <video> plays through loudspeaker, <audio> through earpiece
 function setupRemoteAudio(rs) {
@@ -702,6 +781,7 @@ function cleanup(status) {
   isCamOff.value = false
   isSpeaker.value = false
   isSwapped.value = false
+  facingFront.value = true
   callDurationSec.value = 0
   pendingSignals = []
   callStartedByMe = false
@@ -885,7 +965,10 @@ body {
 .icon-btn:active { background: var(--accent); color: #fff; }
 
 .refresh-btn {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   margin: 16px auto;
   padding: 8px 24px;
   background: var(--card);
@@ -894,6 +977,21 @@ body {
   color: var(--text2);
   font-size: 13px;
   cursor: pointer;
+  transition: opacity .2s, background .15s;
+}
+.refresh-btn:active { background: var(--border); }
+.refresh-btn:disabled { opacity: .5; cursor: not-allowed; }
+.refresh-icon { transition: transform .3s ease; }
+.refresh-btn.loading .refresh-icon { animation: spin .7s linear infinite; }
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.contacts-list { animation: listIn .3s ease; }
+@keyframes listIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* ─── History ─── */
@@ -975,7 +1073,16 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  animation: sceneIn .3s ease;
 }
+@keyframes sceneIn {
+  from { opacity: 0; transform: scale(.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Fade transition */
+.fade-enter-active, .fade-leave-active { transition: opacity .25s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 
 /* Incoming */
 .incoming-scene { gap: 16px; background: var(--bg); }
@@ -1077,7 +1184,7 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   padding: 16px 12px;
   padding-bottom: max(16px, env(safe-area-inset-bottom));
   background: rgba(0,0,0,.85);
@@ -1100,6 +1207,8 @@ body {
 }
 .ctrl.on { background: rgba(255,255,255,.25); }
 .ctrl:active { transform: scale(.9); }
+.ctrl:disabled { opacity: .3; cursor: not-allowed; }
+.ctrl:disabled:active { transform: none; }
 
 .end-ctrl {
   background: var(--red);
@@ -1123,6 +1232,58 @@ body {
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
+/* Video avatar overlays */
+.vid-avatar-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  z-index: 5;
+  gap: 12px;
+}
+.pip-avatar-overlay {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 110px;
+  height: 150px;
+  border-radius: 12px;
+  border: 2px solid rgba(255,255,255,.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  z-index: 11;
+  cursor: pointer;
+}
+.vid-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: rgba(91,127,255,.15);
+  border: 2px solid rgba(91,127,255,.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.vid-avatar.sm {
+  width: 48px;
+  height: 48px;
+  font-size: 20px;
+}
+.vid-avatar-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  opacity: .7;
+}
+
 .toast.info { background: rgba(91,127,255,.85); color: #fff; }
 .toast.warn { background: rgba(250,204,21,.85); color: #000; }
 .toast.err { background: rgba(244,63,94,.85); color: #fff; }
