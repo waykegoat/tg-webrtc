@@ -153,4 +153,14 @@ bot.on('polling_error', (err) => {
   console.error('[Bot] Polling error:', err.code, err.message);
 });
 
+// Minimal HTTP server so Render Web Service doesn't time out
+const http = require('http');
+const PORT = process.env.PORT || 3001;
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ status: 'bot running' }));
+}).listen(PORT, () => {
+  console.log(`[Bot] Health server on port ${PORT}`);
+});
+
 console.log('[Bot] Ready, listening for messages...');
