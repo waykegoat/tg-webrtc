@@ -221,6 +221,7 @@ const isCamOff = ref(false)
 const isSpeaker = ref(false)
 const audioOnly = ref(false)
 const isSwapped = ref(false)
+const remoteCamOff = ref(false)
 const facingFront = ref(true)
 const refreshingContacts = ref(false)
 const refreshingHistory = ref(false)
@@ -274,8 +275,14 @@ const peerName = computed(() => {
   return remoteUserId.value
 })
 
-const showMainAvatar = computed(() => isSwapped.value ? isCamOff.value : audioOnly.value)
-const showPipAvatar = computed(() => isSwapped.value ? audioOnly.value : isCamOff.value)
+const showMainAvatar = computed(() => {
+  if (isSwapped.value) return isCamOff.value || audioOnly.value
+  return remoteCamOff.value || audioOnly.value
+})
+const showPipAvatar = computed(() => {
+  if (isSwapped.value) return remoteCamOff.value || audioOnly.value
+  return isCamOff.value || audioOnly.value
+})
 const mainAvatarLetter = computed(() => isSwapped.value ? myInitial.value : peerInitial.value)
 const mainAvatarName = computed(() => isSwapped.value ? 'Вы' : peerName.value)
 const pipAvatarLetter = computed(() => isSwapped.value ? peerInitial.value : myInitial.value)
@@ -519,6 +526,10 @@ function handleSignal(msg) {
       }
       break
 
+    case 'camera-state':
+      remoteCamOff.value = msg.payload?.camOff || false
+      break
+
     case 'hangup':
       showToast('Собеседник завершил звонок', 'warn')
       cleanup('завершён')
@@ -674,6 +685,8 @@ async function toggleCamera() {
     const on = !vt[0].enabled
     vt.forEach((t) => { t.enabled = on })
     isCamOff.value = !on
+    const target = remoteUserId.value || targetUserId.value
+    if (target) sendWs({ type: 'camera-state', targetUserId: target, payload: { camOff: !on } })
   } else {
     try {
       const vs = await navigator.mediaDevices.getUserMedia({
@@ -684,6 +697,8 @@ async function toggleCamera() {
       peer.addTrack(track, localStream)
       isCamOff.value = false
       audioOnly.value = false
+      const target = remoteUserId.value || targetUserId.value
+      if (target) sendWs({ type: 'camera-state', targetUserId: target, payload: { camOff: false } })
       await nextTick()
       assignVideos()
     } catch { showToast('Не удалось включить камеру', 'err') }
@@ -879,6 +894,7 @@ function cleanup(status) {
   isCamOff.value = false
   isSpeaker.value = false
   isSwapped.value = false
+  remoteCamOff.value = false
   facingFront.value = true
   callDurationSec.value = 0
   pendingSignals = []

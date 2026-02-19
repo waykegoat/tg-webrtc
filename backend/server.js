@@ -232,7 +232,8 @@ wss.on('connection', (ws) => {
       case 'signal':
       case 'hangup':
       case 'reject':
-      case 'busy': {
+      case 'busy':
+      case 'camera-state': {
         const targetId = String(msg.targetUserId);
         const targetWs = clients.get(targetId);
         if (targetWs && targetWs.readyState === 1) {
