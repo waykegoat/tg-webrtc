@@ -68,10 +68,10 @@ app.get('/api/contacts', (req, res) => {
   const myFriends = getFriends(uid);
   const list = [];
   for (const friendId of myFriends) {
-    const user = users.get(friendId);
-    if (!user) continue;
+    const user = users.get(friendId) || { id: friendId, firstName: '', lastName: '', username: '' };
     list.push({
       ...user,
+      id: friendId,
       online: clients.has(friendId),
       isFriend: true,
     });
@@ -83,13 +83,20 @@ app.get('/api/contacts', (req, res) => {
 
 // Add mutual friendship (referral)
 app.post('/api/add-friend', (req, res) => {
-  const { userId, friendId } = req.body;
+  const { userId, friendId, userProfile } = req.body;
   if (!userId || !friendId) return res.status(400).json({ error: 'userId and friendId required' });
   const a = String(userId);
   const b = String(friendId);
   if (a === b) return res.status(400).json({ error: 'cannot add yourself' });
+  // Ensure both users have entries so they show up in contacts
+  if (!users.has(a)) {
+    users.set(a, { id: a, firstName: (userProfile?.firstName) || '', lastName: (userProfile?.lastName) || '', username: (userProfile?.username) || '', lastSeen: Date.now() });
+  }
+  if (!users.has(b)) {
+    users.set(b, { id: b, firstName: '', lastName: '', username: '', lastSeen: 0 });
+  }
   addFriend(a, b);
-  console.log(`[Friends] ${a} <-> ${b}`);
+  console.log(`[Friends] ${a} <-> ${b} | users: ${users.size} | friends(${a}): ${[...getFriends(a)].join(',')}`);
   res.json({ ok: true });
 });
 

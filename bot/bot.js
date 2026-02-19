@@ -74,7 +74,15 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
     console.log(`[Bot] Referral: userId=${userId}, friendId=${friendId}`);
     if (friendId && friendId !== userId) {
       try {
-        await postBackend('/api/add-friend', { userId, friendId });
+        await postBackend('/api/add-friend', {
+          userId,
+          friendId,
+          userProfile: {
+            firstName: msg.from.first_name || '',
+            lastName: msg.from.last_name || '',
+            username: msg.from.username || '',
+          },
+        });
         bot.sendMessage(chatId,
           `✅ Контакт добавлен!\n\nТеперь вы можете звонить друг другу.`,
           {
