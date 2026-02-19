@@ -113,7 +113,7 @@
     <div v-if="callState === 'incoming'" class="scene incoming-scene">
       <div class="inc-pulse"></div>
       <div class="inc-avatar">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span class="inc-initial">{{ callerInitial }}</span>
       </div>
       <p class="inc-label">Входящий звонок</p>
       <p class="inc-name">{{ callerDisplayName }}</p>
@@ -129,10 +129,18 @@
 
     <!-- ═══ CALLING ═══ -->
     <div v-if="callState === 'calling'" class="scene calling-scene">
-      <video ref="callingLocalVideo" class="pip-video" autoplay playsinline muted></video>
+      <div class="calling-preview">
+        <video v-if="!audioOnly" ref="callingLocalVideo" class="calling-local-video" autoplay playsinline muted></video>
+        <div v-else class="calling-local-avatar">
+          <div class="vid-avatar sm">{{ myInitial }}</div>
+        </div>
+      </div>
       <div class="calling-pulse"></div>
+      <div class="calling-callee-avatar">
+        <span>{{ targetInitial }}</span>
+      </div>
       <p class="calling-label">Вызов...</p>
-      <p class="calling-name">{{ targetUserId }}</p>
+      <p class="calling-name">{{ targetDisplayName }}</p>
       <button class="round-btn reject-btn" @click="hangup">
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -141,14 +149,14 @@
     <!-- ═══ ACTIVE CALL ═══ -->
     <div v-if="callState === 'active'" class="scene active-scene">
       <div class="vid-wrap">
-        <video ref="mainVideo" class="main-video" autoplay playsinline :muted="isSwapped"></video>
+        <video ref="mainVideo" class="main-video" autoplay playsinline muted></video>
         <transition name="fade">
           <div v-if="showMainAvatar" class="vid-avatar-overlay">
             <div class="vid-avatar">{{ mainAvatarLetter }}</div>
             <span class="vid-avatar-name">{{ mainAvatarName }}</span>
           </div>
         </transition>
-        <video ref="pipVideoEl" class="pip-video pip-active" autoplay playsinline :muted="!isSwapped" @click="swapVideos"></video>
+        <video ref="pipVideoEl" class="pip-video pip-active" autoplay playsinline muted @click="swapVideos"></video>
         <transition name="fade">
           <div v-if="showPipAvatar" class="pip-avatar-overlay" @click="swapVideos">
             <div class="vid-avatar sm">{{ pipAvatarLetter }}</div>
@@ -256,6 +264,24 @@ const callerDisplayName = computed(() => {
   const c = contacts.value.find((x) => x.id === remoteUserId.value)
   if (c) return contactDisplayName(c)
   return remoteUserId.value
+})
+
+const callerInitial = computed(() => {
+  const c = contacts.value.find((x) => x.id === remoteUserId.value)
+  if (c) return contactInitials(c)
+  return '#'
+})
+
+const targetDisplayName = computed(() => {
+  const c = contacts.value.find((x) => x.id === targetUserId.value)
+  if (c) return contactDisplayName(c)
+  return targetUserId.value
+})
+
+const targetInitial = computed(() => {
+  const c = contacts.value.find((x) => x.id === targetUserId.value)
+  if (c) return contactInitials(c)
+  return '#'
 })
 
 const myInitial = computed(() => {
@@ -623,6 +649,7 @@ function rejectCall() {
 }
 
 function hangup() {
+  playHangupTone()
   const target = remoteUserId.value || targetUserId.value
   if (target) sendWs({ type: 'hangup', targetUserId: target })
   cleanup('завершён')
@@ -676,6 +703,7 @@ function toggleMute() {
   if (!localStream) return
   localStream.getAudioTracks().forEach((t) => { t.enabled = !t.enabled })
   isMuted.value = !isMuted.value
+  playBeep(isMuted.value ? 800 : 1200, 0.08)
 }
 
 async function toggleCamera() {
@@ -778,6 +806,41 @@ function startDurationTimer() {
   durationTimer = setInterval(() => {
     callDurationSec.value = Math.floor((Date.now() - callStartTime) / 1000)
   }, 1000)
+}
+
+// ─── UI sound effects (Web Audio API) ───
+function playBeep(freq, duration, vol = 0.12) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)()
+    const osc = ctx.createOscillator()
+    const g = ctx.createGain()
+    osc.frequency.value = freq
+    osc.type = 'sine'
+    g.gain.value = vol
+    osc.connect(g)
+    g.connect(ctx.destination)
+    osc.start()
+    osc.stop(ctx.currentTime + duration)
+    osc.onended = () => ctx.close()
+  } catch {}
+}
+
+function playHangupTone() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)()
+    const osc = ctx.createOscillator()
+    const g = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(600, ctx.currentTime)
+    osc.frequency.linearRampToValueAtTime(350, ctx.currentTime + 0.3)
+    g.gain.setValueAtTime(0.12, ctx.currentTime)
+    g.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.35)
+    osc.connect(g)
+    g.connect(ctx.destination)
+    osc.start()
+    osc.stop(ctx.currentTime + 0.4)
+    osc.onended = () => ctx.close()
+  } catch {}
 }
 
 // ─── Ring sounds (Web Audio API) ───
@@ -1212,10 +1275,16 @@ body {
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  background: var(--card);
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border: 2px solid rgba(91,127,255,.35);
   display: flex;
   align-items: center;
   justify-content: center;
+}
+.inc-initial {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--accent);
 }
 .inc-label { font-size: 14px; color: var(--text2); margin-top: 24px; }
 .inc-name { font-size: 22px; font-weight: 700; }
@@ -1238,14 +1307,53 @@ body {
 
 /* Calling */
 .calling-scene { gap: 16px; background: var(--bg); position: relative; }
+.calling-preview {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 110px;
+  height: 150px;
+  border-radius: 12px;
+  border: 2px solid rgba(255,255,255,.15);
+  overflow: hidden;
+  z-index: 10;
+  background: #1a1a2e;
+}
+.calling-local-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.calling-local-avatar {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+}
 .calling-pulse {
-  width: 80px;
-  height: 80px;
+  width: 100px;
+  height: 100px;
   border-radius: 50%;
   border: 2px solid var(--accent);
   animation: pulse 2s ease-out infinite;
 }
-.calling-label { font-size: 14px; color: var(--text2); }
+.calling-callee-avatar {
+  margin-top: -90px;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border: 2px solid rgba(91,127,255,.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.calling-label { font-size: 14px; color: var(--text2); margin-top: 24px; }
 .calling-name { font-size: 22px; font-weight: 700; margin-bottom: 32px; }
 
 @keyframes pulse {
