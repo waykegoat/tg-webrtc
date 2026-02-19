@@ -62,25 +62,22 @@ app.post('/api/register', (req, res) => {
   res.json({ ok: true });
 });
 
-// Get contacts: personal friends first, then all other users
+// Get contacts: only friends (added via referral link)
 app.get('/api/contacts', (req, res) => {
   const uid = req.query.userId || req.query.exclude;
   const myFriends = getFriends(uid);
   const list = [];
-  for (const [id, user] of users) {
-    if (id === uid) continue;
+  for (const friendId of myFriends) {
+    const user = users.get(friendId);
+    if (!user) continue;
     list.push({
       ...user,
-      online: clients.has(id),
-      isFriend: myFriends.has(id),
+      online: clients.has(friendId),
+      isFriend: true,
     });
   }
-  // Friends first, then online, then offline
-  list.sort((a, b) => {
-    if (a.isFriend !== b.isFriend) return b.isFriend ? 1 : -1;
-    if (a.online !== b.online) return b.online ? 1 : -1;
-    return 0;
-  });
+  // Online first
+  list.sort((a, b) => (b.online ? 1 : 0) - (a.online ? 1 : 0));
   res.json(list);
 });
 

@@ -661,8 +661,8 @@ function showToast(msg, type = 'info') {
 
 // ─── Cleanup ───
 function cleanup(status) {
-  // Log the call if it was connected or attempted
-  if (callState.value !== 'idle' && (remoteUserId.value || targetUserId.value)) {
+  // Only the initiator saves the call log to avoid duplicates
+  if (callStartedByMe && callState.value !== 'idle' && (remoteUserId.value || targetUserId.value)) {
     saveCallLog(status || 'завершён')
   }
 
