@@ -1,4 +1,5 @@
 require('dotenv').config();
+const https = require('https');
 const TelegramBot = require('node-telegram-bot-api');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -10,9 +11,41 @@ if (!BOT_TOKEN) {
   process.exit(1);
 }
 
+// Helper: POST JSON to backend (uses built-in https, no fetch needed)
+function postBackend(path, data) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(data);
+    const url = new URL(path, BACKEND_URL);
+    const req = https.request({
+      hostname: url.hostname,
+      port: url.port || 443,
+      path: url.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+    }, (res) => {
+      let body = '';
+      res.on('data', (d) => { body += d; });
+      res.on('end', () => {
+        console.log(`[Bot] POST ${path} -> ${res.statusCode}: ${body}`);
+        resolve(body);
+      });
+    });
+    req.on('error', (e) => {
+      console.error(`[Bot] POST ${path} error:`, e.message);
+      reject(e);
+    });
+    req.write(payload);
+    req.end();
+  });
+}
+
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 console.log('[Bot] Started polling...');
+console.log('[Bot] BACKEND_URL:', BACKEND_URL);
 
 // /start command — handles both normal start and referral links
 bot.onText(/\/start(.*)/, async (msg, match) => {
@@ -21,17 +54,15 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
   const userName = msg.from.first_name || 'пользователь';
   const param = (match[1] || '').trim();
 
+  console.log(`[Bot] /start from ${userId}, param="${param}"`);
+
   // Register this user on the backend
   try {
-    await fetch(`${BACKEND_URL}/api/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: userId,
-        firstName: msg.from.first_name || '',
-        lastName: msg.from.last_name || '',
-        username: msg.from.username || '',
-      }),
+    await postBackend('/api/register', {
+      id: userId,
+      firstName: msg.from.first_name || '',
+      lastName: msg.from.last_name || '',
+      username: msg.from.username || '',
     });
   } catch (e) {
     console.error('[Bot] Register error:', e.message);
@@ -40,13 +71,10 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
   // Handle referral: /start add_123456
   if (param.startsWith('add_')) {
     const friendId = param.slice(4);
+    console.log(`[Bot] Referral: userId=${userId}, friendId=${friendId}`);
     if (friendId && friendId !== userId) {
       try {
-        await fetch(`${BACKEND_URL}/api/add-friend`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, friendId }),
-        });
+        await postBackend('/api/add-friend', { userId, friendId });
         bot.sendMessage(chatId,
           `✅ Контакт добавлен!\n\nТеперь вы можете звонить друг другу.`,
           {
