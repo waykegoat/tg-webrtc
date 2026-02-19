@@ -239,6 +239,10 @@ let durationTimer = null
 let pendingSignals = []
 let speakerEl = null
 let earpieceEl = null
+let ringAudioCtx = null
+let ringOscillator = null
+let ringGain = null
+let ringInterval = null
 const callDurationSec = ref(0)
 
 const callDuration = computed(() => {
@@ -504,6 +508,7 @@ function handleSignal(msg) {
       callState.value = 'incoming'
       audioOnly.value = msg.payload?.audioOnly || false
       callStartedByMe = false
+      startRingtone()
       break
 
     case 'signal':
@@ -572,6 +577,7 @@ async function startCall(isAudioOnly) {
   localStream = stream
   callState.value = 'calling'
   remoteUserId.value = targetUserId.value
+  startRingback()
 
   await nextTick()
   if (callingLocalVideo.value && !isAudioOnly) {
@@ -583,6 +589,7 @@ async function startCall(isAudioOnly) {
 }
 
 async function acceptCall() {
+  stopRingSound()
   const stream = await getMedia(audioOnly.value)
   if (!stream) { rejectCall(); return }
   localStream = stream
@@ -620,6 +627,7 @@ function createPeer(initiator, stream) {
 
   peer.on('stream', (rs) => {
     remoteStream = rs
+    stopRingSound()
     callState.value = 'active'
     startDurationTimer()
     nextTick(() => {
@@ -757,6 +765,95 @@ function startDurationTimer() {
   }, 1000)
 }
 
+// ─── Ring sounds (Web Audio API) ───
+function createRingCtx() {
+  if (!ringAudioCtx) ringAudioCtx = new (window.AudioContext || window.webkitAudioContext)()
+  return ringAudioCtx
+}
+
+// Incoming call ringtone: repeating dual-tone burst
+function startRingtone() {
+  stopRingSound()
+  const ctx = createRingCtx()
+  ringGain = ctx.createGain()
+  ringGain.gain.value = 0
+  ringGain.connect(ctx.destination)
+
+  const osc1 = ctx.createOscillator()
+  osc1.frequency.value = 440
+  osc1.type = 'sine'
+  osc1.connect(ringGain)
+  osc1.start()
+
+  const osc2 = ctx.createOscillator()
+  osc2.frequency.value = 480
+  osc2.type = 'sine'
+  osc2.connect(ringGain)
+  osc2.start()
+
+  ringOscillator = { osc1, osc2 }
+
+  // Pattern: 1s on, 2s off
+  let on = true
+  ringGain.gain.value = 0.15
+  ringInterval = setInterval(() => {
+    on = !on
+    ringGain.gain.setTargetAtTime(on ? 0.15 : 0, ctx.currentTime, 0.05)
+  }, on ? 1000 : 2000)
+
+  // Alternate timing: 1s ring, 2s silence
+  clearInterval(ringInterval)
+  function ringCycle() {
+    if (!ringGain) return
+    ringGain.gain.setTargetAtTime(0.15, ringAudioCtx.currentTime, 0.02)
+    setTimeout(() => {
+      if (!ringGain) return
+      ringGain.gain.setTargetAtTime(0, ringAudioCtx.currentTime, 0.02)
+      ringInterval = setTimeout(ringCycle, 2000)
+    }, 1000)
+  }
+  ringCycle()
+}
+
+// Caller ringback: short beep every 3s
+function startRingback() {
+  stopRingSound()
+  const ctx = createRingCtx()
+  ringGain = ctx.createGain()
+  ringGain.gain.value = 0
+  ringGain.connect(ctx.destination)
+
+  const osc = ctx.createOscillator()
+  osc.frequency.value = 425
+  osc.type = 'sine'
+  osc.connect(ringGain)
+  osc.start()
+  ringOscillator = { osc1: osc }
+
+  // Pattern: 1s beep, 3s silence
+  function beepCycle() {
+    if (!ringGain) return
+    ringGain.gain.setTargetAtTime(0.1, ringAudioCtx.currentTime, 0.02)
+    setTimeout(() => {
+      if (!ringGain) return
+      ringGain.gain.setTargetAtTime(0, ringAudioCtx.currentTime, 0.02)
+      ringInterval = setTimeout(beepCycle, 3000)
+    }, 1000)
+  }
+  beepCycle()
+}
+
+function stopRingSound() {
+  if (ringInterval) { clearTimeout(ringInterval); clearInterval(ringInterval); ringInterval = null }
+  if (ringOscillator) {
+    try { ringOscillator.osc1?.stop() } catch {}
+    try { ringOscillator.osc2?.stop() } catch {}
+    ringOscillator = null
+  }
+  if (ringGain) { ringGain.disconnect(); ringGain = null }
+  if (ringAudioCtx) { ringAudioCtx.close().catch(() => {}); ringAudioCtx = null }
+}
+
 // ─── Toast ───
 function showToast(msg, type = 'info') {
   toastMsg.value = msg
@@ -771,6 +868,7 @@ function cleanup(status) {
     saveCallLog(status || 'завершён')
   }
 
+  stopRingSound()
   if (peer) { peer.destroy(); peer = null }
   if (localStream) { localStream.getTracks().forEach((t) => t.stop()); localStream = null }
   remoteStream = null
