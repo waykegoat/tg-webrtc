@@ -8,12 +8,16 @@
           <span class="hdr-dot" :class="wsConnected ? 'on' : 'off'"></span>
           <span class="hdr-title">Звонки</span>
         </div>
-        <span v-if="myUserId" class="hdr-id">{{ myUserId }}</span>
+        <button class="hdr-share" @click="shareInvite">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+          <span>Пригласить</span>
+        </button>
       </header>
 
       <!-- Tabs -->
       <div class="tabs">
         <button class="tab" :class="{ sel: tab === 'contacts' }" @click="tab = 'contacts'">Контакты</button>
+        <button class="tab" :class="{ sel: tab === 'history' }" @click="tab = 'history'; fetchHistory()">История</button>
         <button class="tab" :class="{ sel: tab === 'dial' }" @click="tab = 'dial'">Набрать</button>
       </div>
 
@@ -21,7 +25,7 @@
       <div v-if="tab === 'contacts'" class="contacts-wrap">
         <div v-if="contacts.length === 0" class="empty">
           <p>Пока нет контактов</p>
-          <p class="empty-sub">Контакты появятся, когда другие<br>пользователи откроют приложение</p>
+          <p class="empty-sub">Нажмите «Пригласить» чтобы<br>добавить друзей по ссылке</p>
         </div>
         <div v-else class="contacts-list">
           <div
@@ -34,7 +38,10 @@
               {{ contactInitials(c) }}
             </div>
             <div class="contact-info">
-              <span class="contact-name">{{ contactDisplayName(c) }}</span>
+              <span class="contact-name">
+                {{ contactDisplayName(c) }}
+                <span v-if="c.isFriend" class="friend-badge">друг</span>
+              </span>
               <span class="contact-status">{{ c.online ? 'онлайн' : 'офлайн' }}</span>
             </div>
             <div class="contact-actions">
@@ -48,6 +55,30 @@
           </div>
         </div>
         <button class="refresh-btn" @click="fetchContacts">Обновить</button>
+      </div>
+
+      <!-- History tab -->
+      <div v-if="tab === 'history'" class="contacts-wrap">
+        <div v-if="history.length === 0" class="empty">
+          <p>Нет звонков</p>
+          <p class="empty-sub">История вызовов появится<br>после первого звонка</p>
+        </div>
+        <div v-else class="contacts-list">
+          <div v-for="h in history" :key="h.id" class="history-row">
+            <div class="hist-icon" :class="h.callerId === myUserId ? 'out' : 'inc'">
+              <svg v-if="h.callerId === myUserId" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
+              <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="17" y1="7" x2="7" y2="17"/><polyline points="17 17 7 17 7 7"/></svg>
+            </div>
+            <div class="hist-info">
+              <span class="hist-name">{{ histPeerName(h) }}</span>
+              <span class="hist-meta">
+                {{ h.type === 'video' ? 'Видео' : 'Аудио' }} · {{ formatDuration(h.duration) }} · {{ h.status }}
+              </span>
+            </div>
+            <div class="hist-time">{{ formatTime(h.startTime) }}</div>
+          </div>
+        </div>
+        <button class="refresh-btn" @click="fetchHistory">Обновить</button>
       </div>
 
       <!-- Dial pad -->
@@ -113,7 +144,7 @@
           <svg v-if="!isMuted" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
           <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 005.12 2.12M15 9.34V4a3 3 0 00-5.94-.6"/><path d="M17 16.95A7 7 0 015 12v-2m14 0v2c0 .76-.13 1.49-.35 2.17"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
         </button>
-        <button class="ctrl" :class="{ on: !isSpeaker }" @click="toggleSpeaker">
+        <button class="ctrl" :class="{ on: isSpeaker }" @click="toggleSpeaker">
           <svg v-if="isSpeaker" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
           <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
         </button>
@@ -144,6 +175,7 @@ import SimplePeer from 'simple-peer'
 // ─── Config ───
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3000'
 const API_URL = WS_URL.replace('wss://', 'https://').replace('ws://', 'http://')
+const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME || ''
 
 const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -162,15 +194,14 @@ const wsConnected = ref(false)
 const toastMsg = ref('')
 const toastType = ref('info')
 const contacts = ref([])
+const history = ref([])
 
 const isMuted = ref(false)
 const isCamOff = ref(false)
-const isSpeaker = ref(true)
+const isSpeaker = ref(false)
 const audioOnly = ref(false)
 const isSwapped = ref(false)
 
-const localVideo = ref(null)
-const remoteVideo = ref(null)
 const callingLocalVideo = ref(null)
 const mainVideo = ref(null)
 const pipVideoEl = ref(null)
@@ -182,8 +213,9 @@ let remoteStream = null
 let reconnectTimer = null
 let callStartTime = null
 let durationTimer = null
-let remoteAudioEl = null
 let pendingSignals = []
+let speakerEl = null
+let earpieceEl = null
 const callDurationSec = ref(0)
 
 const callDuration = computed(() => {
@@ -209,6 +241,31 @@ function contactInitials(c) {
   if (c.firstName) return c.firstName.charAt(0).toUpperCase()
   if (c.username) return c.username.charAt(0).toUpperCase()
   return '#'
+}
+
+function formatDuration(sec) {
+  if (!sec || sec < 1) return '0:00'
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+function formatTime(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  const now = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  if (d.toDateString() === now.toDateString()) return time
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)} ${time}`
+}
+
+function histPeerName(h) {
+  const peerId = h.callerId === myUserId.value ? h.receiverId : h.callerId
+  const peerInfo = h.callerId === myUserId.value ? h.receiverName : h.callerName
+  if (peerInfo?.firstName) return [peerInfo.firstName, peerInfo.lastName].filter(Boolean).join(' ')
+  if (peerInfo?.username) return '@' + peerInfo.username
+  return peerId
 }
 
 // ─── Telegram WebApp ───
@@ -241,6 +298,23 @@ function initTelegram() {
   }
 }
 
+function shareInvite() {
+  const botUser = BOT_USERNAME
+  const link = botUser
+    ? `https://t.me/${botUser}?start=add_${myUserId.value}`
+    : `Мой ID для звонков: ${myUserId.value}`
+
+  const tg = window.Telegram?.WebApp
+  if (tg && botUser) {
+    tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Добавь меня в контакты для звонков!')}`)
+  } else if (navigator.share) {
+    navigator.share({ title: 'Звонки', text: 'Добавь меня в контакты!', url: link }).catch(() => {})
+  } else {
+    navigator.clipboard?.writeText(link)
+    showToast('Ссылка скопирована', 'info')
+  }
+}
+
 async function registerProfile() {
   try {
     await fetch(`${API_URL}/api/register`, {
@@ -260,12 +334,44 @@ async function registerProfile() {
 
 async function fetchContacts() {
   try {
-    const res = await fetch(`${API_URL}/api/contacts?exclude=${myUserId.value}`)
+    const res = await fetch(`${API_URL}/api/contacts?userId=${myUserId.value}`)
     contacts.value = await res.json()
   } catch (e) {
     console.warn('[API] contacts failed:', e)
   }
 }
+
+async function fetchHistory() {
+  try {
+    const res = await fetch(`${API_URL}/api/history?userId=${myUserId.value}`)
+    history.value = await res.json()
+  } catch (e) {
+    console.warn('[API] history failed:', e)
+  }
+}
+
+async function saveCallLog(status) {
+  const peerId = remoteUserId.value || targetUserId.value
+  if (!peerId) return
+  try {
+    await fetch(`${API_URL}/api/call-log`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        callerId: callStartedByMe ? myUserId.value : peerId,
+        receiverId: callStartedByMe ? peerId : myUserId.value,
+        startTime: callStartTime || Date.now(),
+        duration: callDurationSec.value,
+        type: audioOnly.value ? 'audio' : 'video',
+        status,
+      }),
+    })
+  } catch (e) {
+    console.warn('[API] call-log failed:', e)
+  }
+}
+
+let callStartedByMe = false
 
 // ─── WebSocket ───
 function connectWs() {
@@ -313,6 +419,7 @@ function handleSignal(msg) {
       remoteUserId.value = msg.from
       callState.value = 'incoming'
       audioOnly.value = msg.payload?.audioOnly || false
+      callStartedByMe = false
       break
 
     case 'signal':
@@ -325,27 +432,27 @@ function handleSignal(msg) {
 
     case 'hangup':
       showToast('Собеседник завершил звонок', 'warn')
-      cleanup()
+      cleanup('завершён')
       break
 
     case 'reject':
       showToast('Звонок отклонён', 'warn')
-      cleanup()
+      cleanup('отклонён')
       break
 
     case 'busy':
       showToast('Собеседник занят', 'warn')
-      cleanup()
+      cleanup('занят')
       break
 
     case 'offline':
       showToast(msg.message || 'Не в сети', 'info')
-      cleanup()
+      cleanup('не в сети')
       break
 
     case 'error':
       showToast(msg.message, 'err')
-      if (callState.value === 'calling') cleanup()
+      if (callState.value === 'calling') cleanup('ошибка')
       break
   }
 }
@@ -375,6 +482,7 @@ function callContactAudio(c) { targetUserId.value = c.id; startCall(true) }
 async function startCall(isAudioOnly) {
   if (!targetUserId.value) return
   audioOnly.value = isAudioOnly
+  callStartedByMe = true
   const stream = await getMedia(isAudioOnly)
   if (!stream) return
   localStream = stream
@@ -409,13 +517,13 @@ async function acceptCall() {
 
 function rejectCall() {
   sendWs({ type: 'reject', targetUserId: remoteUserId.value })
-  cleanup()
+  cleanup('отклонён')
 }
 
 function hangup() {
   const target = remoteUserId.value || targetUserId.value
   if (target) sendWs({ type: 'hangup', targetUserId: target })
-  cleanup()
+  cleanup('завершён')
 }
 
 // ─── Peer ───
@@ -437,10 +545,10 @@ function createPeer(initiator, stream) {
   })
 
   peer.on('connect', () => console.log('[Peer] Connected'))
-  peer.on('close', () => cleanup())
+  peer.on('close', () => cleanup('завершён'))
   peer.on('error', (err) => {
     showToast('Ошибка: ' + err.message, 'err')
-    cleanup()
+    cleanup('ошибка')
   })
 }
 
@@ -490,13 +598,25 @@ async function toggleCamera() {
   }
 }
 
+// ─── Speaker / earpiece toggle ───
+// Mobile trick: <video> plays through loudspeaker, <audio> through earpiece
 function setupRemoteAudio(rs) {
-  if (remoteAudioEl) { remoteAudioEl.srcObject = null; remoteAudioEl.remove() }
-  remoteAudioEl = document.createElement('audio')
-  remoteAudioEl.srcObject = rs
-  remoteAudioEl.autoplay = true
-  remoteAudioEl.style.display = 'none'
-  document.body.appendChild(remoteAudioEl)
+  cleanupAudioEls()
+  // Create both elements, only one active at a time
+  earpieceEl = document.createElement('audio')
+  earpieceEl.srcObject = rs
+  earpieceEl.autoplay = true
+  earpieceEl.playsInline = true
+  earpieceEl.style.display = 'none'
+  document.body.appendChild(earpieceEl)
+
+  speakerEl = document.createElement('video')
+  speakerEl.srcObject = rs
+  speakerEl.autoplay = false
+  speakerEl.playsInline = true
+  speakerEl.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;'
+  document.body.appendChild(speakerEl)
+
   applySpeaker()
 }
 
@@ -506,11 +626,20 @@ function toggleSpeaker() {
 }
 
 function applySpeaker() {
-  const el = remoteAudioEl || mainVideo.value
-  if (!el) return
-  if (typeof el.setSinkId === 'function') {
-    el.setSinkId(isSpeaker.value ? 'default' : 'communications').catch(() => {})
+  if (isSpeaker.value) {
+    // Speaker mode: play via hidden <video>, mute <audio>
+    if (earpieceEl) { earpieceEl.muted = true; earpieceEl.pause() }
+    if (speakerEl) { speakerEl.muted = false; speakerEl.play().catch(() => {}) }
+  } else {
+    // Earpiece mode: play via <audio>, mute <video>
+    if (speakerEl) { speakerEl.muted = true; speakerEl.pause() }
+    if (earpieceEl) { earpieceEl.muted = false; earpieceEl.play().catch(() => {}) }
   }
+}
+
+function cleanupAudioEls() {
+  if (earpieceEl) { earpieceEl.srcObject = null; earpieceEl.remove(); earpieceEl = null }
+  if (speakerEl) { speakerEl.srcObject = null; speakerEl.remove(); speakerEl = null }
 }
 
 // ─── Timer ───
@@ -531,19 +660,25 @@ function showToast(msg, type = 'info') {
 }
 
 // ─── Cleanup ───
-function cleanup() {
+function cleanup(status) {
+  // Log the call if it was connected or attempted
+  if (callState.value !== 'idle' && (remoteUserId.value || targetUserId.value)) {
+    saveCallLog(status || 'завершён')
+  }
+
   if (peer) { peer.destroy(); peer = null }
   if (localStream) { localStream.getTracks().forEach((t) => t.stop()); localStream = null }
   remoteStream = null
   if (durationTimer) { clearInterval(durationTimer); durationTimer = null }
-  if (remoteAudioEl) { remoteAudioEl.srcObject = null; remoteAudioEl.remove(); remoteAudioEl = null }
+  cleanupAudioEls()
   callState.value = 'idle'
   isMuted.value = false
   isCamOff.value = false
-  isSpeaker.value = true
+  isSpeaker.value = false
   isSwapped.value = false
   callDurationSec.value = 0
   pendingSignals = []
+  callStartedByMe = false
   fetchContacts()
 }
 
@@ -609,7 +744,21 @@ body {
 .hdr-dot.on { background: var(--green); }
 .hdr-dot.off { background: var(--red); }
 .hdr-title { font-size: 18px; font-weight: 700; }
-.hdr-id { font-size: 12px; color: var(--text2); font-family: monospace; }
+.hdr-share {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s;
+}
+.hdr-share:active { background: var(--border); }
 
 /* ─── Tabs ─── */
 .tabs {
@@ -679,8 +828,19 @@ body {
 .contact-avatar.av-on { border-color: var(--green); color: var(--green); }
 
 .contact-info { flex: 1; min-width: 0; }
-.contact-name { display: block; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.contact-status { font-size: 12px; color: var(--text2); }
+.contact-name { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.friend-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--accent);
+  background: rgba(91,127,255,.12);
+  padding: 1px 6px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.contact-status { font-size: 12px; color: var(--text2); display: block; }
 
 .contact-actions { display: flex; gap: 8px; }
 .icon-btn {
@@ -709,6 +869,29 @@ body {
   font-size: 13px;
   cursor: pointer;
 }
+
+/* ─── History ─── */
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+}
+.hist-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.hist-icon.out { background: rgba(91,127,255,.15); color: var(--accent); }
+.hist-icon.inc { background: rgba(52,211,153,.15); color: var(--green); }
+.hist-info { flex: 1; min-width: 0; }
+.hist-name { display: block; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hist-meta { display: block; font-size: 12px; color: var(--text2); }
+.hist-time { font-size: 12px; color: var(--text2); white-space: nowrap; flex-shrink: 0; }
 
 /* ─── Dial ─── */
 .dial-wrap {
