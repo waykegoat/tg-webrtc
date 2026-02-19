@@ -145,6 +145,7 @@ const callDuration = computed(() => {
 
 // Pending signal data for incoming calls (before user accepts)
 let pendingSignalData = null
+let pendingSignals = []
 
 // ─── Telegram WebApp ───
 function initTelegram() {
@@ -231,6 +232,10 @@ function handleSignal(msg) {
       // WebRTC signaling data
       if (peer) {
         peer.signal(msg.payload)
+      } else {
+        // Buffer signals until peer is created (incoming call not yet accepted)
+        console.log('[Signal] Buffering signal (peer not ready)')
+        pendingSignals.push(msg.payload)
       }
       break
 
@@ -316,9 +321,11 @@ async function acceptCall() {
   // Create peer as receiver
   createPeer(false, stream)
 
-  // If we had pending signal data, signal it now
-  if (pendingSignalData && peer) {
-    // The call message itself isn't a peer signal; signals come separately
+  // Replay buffered signals from the initiator
+  if (pendingSignals.length > 0) {
+    console.log(`[Signal] Replaying ${pendingSignals.length} buffered signals`)
+    pendingSignals.forEach((s) => peer.signal(s))
+    pendingSignals = []
   }
 }
 
@@ -423,6 +430,7 @@ function cleanup() {
   isCamOff.value = false
   callDurationSec.value = 0
   pendingSignalData = null
+  pendingSignals = []
 }
 
 function showError(msg) {
